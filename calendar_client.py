@@ -1,10 +1,13 @@
-"""Google Calendar 연동 - 출장 일정 조회"""
+"""Google Calendar 연동 - 출장 일정 조회 + 일정 생성"""
 
 import datetime
 from pathlib import Path
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+]
 
 try:
     from google.auth.transport.requests import Request
@@ -87,3 +90,33 @@ def format_trips(events):
         wd = WEEKDAY_KR[date.weekday()]
         lines.append(f"[{date.strftime('%m-%d')}/{wd}] {summary}")
     return "\n".join(lines)
+
+
+def create_event(service, calendar_id: str, title: str,
+                 start_date: datetime.date, end_date: datetime.date | None = None,
+                 description: str = "", location: str = ""):
+    """Google Calendar에 일정을 생성합니다. 종일 이벤트로 생성됩니다."""
+    if service is None:
+        return None
+
+    if end_date is None:
+        end_date = start_date + datetime.timedelta(days=1)
+    else:
+        end_date = end_date + datetime.timedelta(days=1)
+
+    body = {
+        "summary": title,
+        "start": {"date": start_date.isoformat()},
+        "end": {"date": end_date.isoformat()},
+    }
+    if description:
+        body["description"] = description
+    if location:
+        body["location"] = location
+
+    try:
+        event = service.events().insert(calendarId=calendar_id, body=body).execute()
+        return event.get("htmlLink")
+    except Exception as e:
+        print(f"  경고: 일정 생성 실패: {e}")
+        return None
