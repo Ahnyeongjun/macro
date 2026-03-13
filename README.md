@@ -67,6 +67,44 @@ macro/
 5. `dist/config.json`에서 `google_calendar.enabled` → `true`
 6. 첫 실행 시 브라우저 인증 → 이후 `token.json`으로 자동 갱신
 
+## MCP 서버 (Cursor/Claude 연동)
+
+Cursor 또는 Claude Desktop에서 자연어로 보고서를 생성할 수 있습니다.
+
+### Cursor 설정
+
+`.cursor/mcp.json`에 추가:
+
+```json
+{
+  "mcpServers": {
+    "weekly-report": {
+      "command": "python",
+      "args": ["C:\\side\\진행 중\\macro\\mcp_server.py"],
+      "env": {}
+    }
+  }
+}
+```
+
+### 제공 도구
+
+| Tool | 설명 |
+|------|------|
+| `list_commits` | 특정 주의 커밋 로그 조회 (최대 4주까지, 패턴 분석용) |
+| `get_trips` | Google Calendar 출장 일정 조회 |
+| `create_calendar_event` | Google Calendar에 새 일정 생성 |
+| `generate_report` | 주간업무보고 엑셀 생성 |
+| `generate_report_with_next_week` | 차주 목표 포함하여 엑셀 생성 |
+| `send_report` | 생성된 보고서 Gmail 발송 |
+
+### 사용 예시
+
+- "이번 주 주간업무보고 만들어줘"
+- "최근 3주간 커밋 보여주고 다음 주 할 일 추천해줘"
+- "보고서 생성하고 메일 보내줘"
+- "3월 20일에 관평동 출장 일정 추가해줘"
+
 ## Gmail 설정
 
 1. Google 계정 → 보안 → 2단계 인증 활성화
