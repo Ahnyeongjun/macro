@@ -1,7 +1,10 @@
 # 주간업무보고 자동화 - 의존성
 # pip install -r requirements.txt
 
-# Google Calendar 연동 (선택 - 출장 일정 자동 입력용)
+# MCP 서버
+fastmcp
+
+# Google Calendar 연동 (선택 - 출장 일정 조회/생성용)
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
