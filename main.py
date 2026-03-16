@@ -93,6 +93,24 @@ def main():
     cal_id = gcal_cfg.get("calendar_id", "primary")
     trip_kw = gcal_cfg.get("trip_keyword", "출장")
 
+    # 캘린더 이벤트 사전 조회 & 카테고리별 분류
+    cat_names = [c["name"] for c in categories]
+    this_week_trips = {}  # category_name -> [(date, summary)]
+    next_week_trips = {}
+    unmatched_this = []
+    unmatched_next = []
+
+    if cal_service:
+        raw_this = calendar_client.fetch_trips(cal_service, cal_id, monday, friday, trip_kw)
+        raw_next = calendar_client.fetch_trips(cal_service, cal_id, next_monday, next_friday, trip_kw)
+        cat_this = calendar_client.categorize_trips(raw_this, cat_names)
+        cat_next = calendar_client.categorize_trips(raw_next, cat_names)
+        for name in cat_names:
+            this_week_trips[name] = cat_this.get(name, [])
+            next_week_trips[name] = cat_next.get(name, [])
+        unmatched_this = cat_this.get(None, [])
+        unmatched_next = cat_next.get(None, [])
+
     # ----- 1. Git 커밋 수집 -----
     print("[1/4] Git 커밋 로그 수집 중...")
     cat_commits = {}
@@ -119,14 +137,25 @@ def main():
     print("\n--- 금주 업무 내용 ---")
     for cat in categories:
         name, cell = cat["name"], cat["this_week_cell"]
+        parts = []
+
+        if "default_this_week" in cat:
+            parts.append(cat["default_this_week"])
 
         if name in cat_commits and cat_commits[name]:
-            content = git_collector.format_by_feature(cat_commits[name])
-        elif cat.get("use_calendar") and cal_service:
-            events = calendar_client.fetch_trips(cal_service, cal_id, monday, friday, trip_kw)
-            content = calendar_client.format_trips(events)
-        elif "default_this_week" in cat:
-            content = cat["default_this_week"]
+            parts.append(git_collector.format_by_folder(cat_commits[name]))
+
+        if this_week_trips.get(name):
+            parts.append(calendar_client.format_trips_as_headers(this_week_trips[name]))
+
+        if cat.get("use_calendar") and cal_service:
+            all_events = this_week_trips.get(name, []) + unmatched_this
+            if all_events:
+                parts.append(calendar_client.format_trips_as_headers(all_events))
+
+        if parts:
+            content = "\n".join(p for p in parts if p and p != "x")
+            content = content or "x"
         elif not args.quick:
             content = input(f"  {name} (금주 내용, Enter=없음): ").strip() or "x"
         else:
@@ -140,12 +169,22 @@ def main():
     print("\n--- 차주 업무 목표 ---")
     for cat in categories:
         name, cell = cat["name"], cat["next_week_cell"]
+        parts = []
+
+        if "default_next_week" in cat:
+            parts.append(cat["default_next_week"])
+
+        if next_week_trips.get(name):
+            parts.append(calendar_client.format_trips_as_headers(next_week_trips[name]))
 
         if cat.get("use_calendar") and cal_service:
-            events = calendar_client.fetch_trips(cal_service, cal_id, next_monday, next_friday, trip_kw)
-            content = calendar_client.format_trips(events)
-        elif "default_next_week" in cat:
-            content = cat["default_next_week"]
+            all_events = next_week_trips.get(name, []) + unmatched_next
+            if all_events:
+                parts.append(calendar_client.format_trips_as_headers(all_events))
+
+        if parts:
+            content = "\n".join(p for p in parts if p and p != "x")
+            content = content or "x"
         elif not args.quick:
             content = input(f"  {name} (차주 목표, Enter=없음): ").strip() or "x"
         else:
