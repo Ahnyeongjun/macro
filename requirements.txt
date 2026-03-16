@@ -8,3 +8,6 @@ fastmcp
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+
+# HRWeb 시간 입력 자동화 (선택)
+playwright
