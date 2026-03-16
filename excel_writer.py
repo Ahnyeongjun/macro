@@ -84,6 +84,10 @@ def update(template_path: str, output_path: str, updates: dict):
         cell = _find_or_create(sd, ref)
         _set_value(cell, value)
 
+        if isinstance(value, str) and "\n" in value:
+            row_num = int("".join(filter(str.isdigit, ref)))
+            _auto_row_height(sd, row_num, value)
+
     new_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'
     new_xml += ET.tostring(root, encoding="unicode")
 
@@ -156,6 +160,24 @@ def _find_or_create(sheet_data, cell_ref: str):
     elem = ET.SubElement(target_row, f"{{{NS}}}c")
     elem.set("r", cell_ref)
     return elem
+
+
+LINE_HEIGHT_PT = 13.5
+MIN_ROW_HEIGHT = 15.0
+
+
+def _auto_row_height(sheet_data, row_num: int, text: str):
+    """줄 수에 맞게 행 높이를 설정합니다."""
+    line_count = text.count("\n") + 1
+    needed = max(line_count * LINE_HEIGHT_PT, MIN_ROW_HEIGHT)
+
+    for row in sheet_data.findall(f"{{{NS}}}row"):
+        if row.attrib.get("r") == str(row_num):
+            current = float(row.attrib.get("ht", "0"))
+            if needed > current:
+                row.set("ht", str(needed))
+                row.set("customHeight", "1")
+            break
 
 
 def _set_value(cell_elem, value):
