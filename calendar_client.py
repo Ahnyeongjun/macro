@@ -50,7 +50,8 @@ def connect(dist_dir: Path, gcal_cfg: dict):
 
 
 def fetch_trips(service, calendar_id: str, start: datetime.date, end: datetime.date, keyword: str):
-    """지정 기간의 출장 일정을 가져옵니다."""
+    """지정 기간의 출장 일정을 가져옵니다.
+    반환: [(date, summary, description)]"""
     if service is None:
         return []
 
@@ -75,7 +76,11 @@ def fetch_trips(service, calendar_id: str, start: datetime.date, end: datetime.d
         s = item.get("start", {})
         date_str = s.get("date") or s.get("dateTime", "")[:10]
         try:
-            events.append((datetime.date.fromisoformat(date_str), item.get("summary", "")))
+            events.append((
+                datetime.date.fromisoformat(date_str),
+                item.get("summary", ""),
+                item.get("description", ""),
+            ))
         except ValueError:
             continue
     return events
@@ -86,10 +91,60 @@ def format_trips(events):
     if not events:
         return "x"
     lines = []
-    for date, summary in sorted(events, key=lambda x: x[0]):
+    for ev in sorted(events, key=lambda x: x[0]):
+        date, summary = ev[0], ev[1]
         wd = WEEKDAY_KR[date.weekday()]
         lines.append(f"[{date.strftime('%m-%d')}/{wd}] {summary}")
     return "\n".join(lines)
+
+
+def format_trips_as_headers(events):
+    """출장 이벤트를 대카테고리 형식으로 포맷합니다.
+
+    출력 예:
+      [03-12/목] 항우연 출장
+      - 기술미팅
+      - APISS 시연
+    """
+    if not events:
+        return ""
+    lines = []
+    for ev in sorted(events, key=lambda x: x[0]):
+        date, summary = ev[0], ev[1]
+        desc = ev[2] if len(ev) > 2 else ""
+        wd = WEEKDAY_KR[date.weekday()]
+        lines.append(f"[{date.strftime('%m-%d')}/{wd}] {summary}")
+        if desc:
+            for dl in desc.strip().split("\n"):
+                dl = dl.strip()
+                if dl:
+                    if not dl.startswith("-"):
+                        dl = f"- {dl}"
+                    lines.append(dl)
+    return "\n".join(lines)
+
+
+def categorize_trips(events, category_names):
+    """이벤트 제목에 카테고리 이름이 포함되면 해당 카테고리로 분류합니다.
+    매칭되지 않은 이벤트는 None 키에 모입니다.
+    events: [(date, summary, description)]"""
+    result = {name: [] for name in category_names}
+    result[None] = []
+
+    for ev in events:
+        date, summary = ev[0], ev[1]
+        desc = ev[2] if len(ev) > 2 else ""
+        matched = False
+        for name in category_names:
+            if name in summary:
+                clean_summary = summary.replace(f"[{name}]", "").replace(name, "").strip()
+                clean_summary = clean_summary.lstrip("- ").strip()
+                result[name].append((date, clean_summary or summary, desc))
+                matched = True
+                break
+        if not matched:
+            result[None].append((date, summary, desc))
+    return result
 
 
 def create_event(service, calendar_id: str, title: str,
