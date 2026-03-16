@@ -25,6 +25,11 @@ DIST_DIR = SCRIPT_DIR / "dist"
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
 
+def _safe(text: str) -> str:
+    """Windows cp949 터미널에서 출력할 수 없는 문자를 제거합니다."""
+    return text.encode("cp949", errors="replace").decode("cp949")
+
+
 def load_config():
     path = DIST_DIR / "config.json"
     with open(path, "r", encoding="utf-8") as f:
@@ -407,7 +412,7 @@ class HRWebUploader:
         for entry in entries:
             ok = self.fill_entry(entry["project"], entry["description"], entry["minutes"])
             if ok:
-                print(f"    {day}일: [{entry['project'][:20]}] {entry['minutes']}분 ← {entry['description'][:40]}")
+                print(f"    {day}일: [{entry['project'][:20]}] {entry['minutes']}분 ← {_safe(entry['description'][:40])}")
         return True
 
 
@@ -498,7 +503,7 @@ def main():
         status = f"커밋 {commit_count}개" if commit_count else ("출장" if trip else "커밋 없음")
         print(f"  {d} ({WEEKDAY_KR[d.weekday()]}): {status} [{src}] → {entry_summary}")
         for e in entries:
-            print(f"    └ {e['description'][:60]}")
+            print(f"    └ {_safe(e['description'][:60])}")
     print()
 
     if args.dry_run:
