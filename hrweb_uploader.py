@@ -9,9 +9,11 @@ Playwright를 사용하여 HRWeb(Blazor Server)에 Git 커밋 기반 시간 데�
 """
 
 import argparse
+import base64
 import calendar
 import datetime
 import json
+import os
 import time
 from pathlib import Path
 
@@ -37,30 +39,41 @@ def load_config():
 
 
 def get_weekdays(year: int, month: int) -> list[datetime.date]:
-    """해당 월의 월~금 날짜 목록을 반환합니다."""
+    """해당 월의 월~금 날짜 목록 (공휴일 제외)을 반환합니다."""
+    import holidays as hl
+    kr_holidays = hl.KR(years=year)
     cal = calendar.Calendar()
     return [
         d for d in cal.itermonthdates(year, month)
-        if d.month == month and d.weekday() < 5
+        if d.month == month and d.weekday() < 5 and d not in kr_holidays
     ]
 
 
 def collect_daily_commits(config, target_date: datetime.date) -> dict:
-    """특정 날짜의 커밋을 카테고리별로 수집합니다."""
+    """특정 날짜의 커밋을 카테고리별로 수집합니다 (로컬 git + GitHub API)."""
     categories = config.get("categories", [])
+    github_token = config.get("github_token") or os.environ.get("GITHUB_TOKEN")
     result = {}
     for cat in categories:
-        repos = cat.get("repos", [])
-        if not repos:
-            continue
         name = cat["name"]
         commits = []
-        for repo in repos:
+
+        # 로컬 git 저장소
+        for repo in cat.get("repos", []):
             if Path(repo).is_dir():
                 day_commits = git_collector.collect(
                     repo, config["author"], target_date, target_date
                 )
                 commits.extend(day_commits)
+
+        # GitHub API (로컬 커밋 없거나 github_repos 설정 시)
+        if not commits or cat.get("github_repos"):
+            for gh_repo in cat.get("github_repos", []):
+                day_commits = git_collector.collect_github(
+                    gh_repo, config["author"], target_date, target_date, github_token
+                )
+                commits.extend(day_commits)
+
         if commits:
             result[name] = commits
     return result
@@ -242,17 +255,18 @@ def build_daily_entries(daily_commits: dict, hrweb_config: dict,
 
 
 class HRWebUploader:
-    def __init__(self, base_url: str, user_id: str, password: str):
+    def __init__(self, base_url: str, user_id: str, password: str, headless: bool = False):
         self.base_url = base_url.rstrip("/")
         self.user_id = user_id
         self.password = password
+        self.headless = headless
         self.page: Page | None = None
         self._pw = None
         self._browser = None
 
     def __enter__(self):
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=False)
+        self._browser = self._pw.chromium.launch(headless=self.headless)
         self.page = self._browser.new_page()
         return self
 
@@ -423,7 +437,17 @@ def main():
     parser.add_argument("--day", type=int, help="특정 일자만 입력 (테스트용)")
     parser.add_argument("--dry-run", action="store_true", help="실제 입력 없이 미리보기")
     parser.add_argument("--no-skip", action="store_true", help="기존 데이터가 있어도 입력")
+    parser.add_argument("--headless", action="store_true", help="브라우저 headless 모드 (CI 환경용)")
     args = parser.parse_args()
+
+    # CI 환경: config.json을 환경변수에서 복원
+    config_json = os.environ.get("HANCOM_CONFIG")
+    config_path = DIST_DIR / "config.json"
+    if config_json and not config_path.exists():
+        DIST_DIR.mkdir(exist_ok=True)
+        config_path.write_text(config_json, encoding="utf-8")
+
+    headless = args.headless or os.environ.get("CI") == "true"
 
     config = load_config()
     hrweb_config = config.get("hrweb", {})
@@ -516,7 +540,7 @@ def main():
     password = hrweb_config["password"]
 
     print("[3/3] HRWeb 입력 중...")
-    with HRWebUploader(url, user_id, password) as uploader:
+    with HRWebUploader(url, user_id, password, headless=headless) as uploader:
         uploader.login()
         print("  로그인 완료")
 

@@ -49,6 +49,13 @@ jobs:
           mkdir -p dist
           echo '${{ secrets.HANCOM_CONFIG }}' > dist/config.json
 
+      # HRWeb (내부망이면 실패해도 계속 진행)
+      - name: Run HRWeb uploader
+        continue-on-error: true
+        run: python hrweb_uploader.py --headless
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run Hancom uploader
         run: python hancom_uploader.py --headless
         env:
