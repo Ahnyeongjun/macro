@@ -8,9 +8,11 @@
 """
 
 import argparse
+import base64
 import calendar
 import datetime
 import json
+import os
 import time
 from pathlib import Path
 
@@ -47,19 +49,28 @@ def get_weekdays(year: int, month: int) -> list[datetime.date]:
 
 def collect_daily_commits(config, target_date: datetime.date) -> dict:
     categories = config.get("categories", [])
+    github_token = config.get("github_token") or os.environ.get("GITHUB_TOKEN")
     result = {}
     for cat in categories:
-        repos = cat.get("repos", [])
-        if not repos:
-            continue
         name = cat["name"]
         commits = []
-        for repo in repos:
+
+        # 로컬 git 저장소
+        for repo in cat.get("repos", []):
             if Path(repo).is_dir():
                 day_commits = git_collector.collect(
                     repo, config["author"], target_date, target_date
                 )
                 commits.extend(day_commits)
+
+        # GitHub API (로컬 커밋이 없거나 github_repos 설정 시)
+        if not commits or cat.get("github_repos"):
+            for gh_repo in cat.get("github_repos", []):
+                day_commits = git_collector.collect_github(
+                    gh_repo, config["author"], target_date, target_date, github_token
+                )
+                commits.extend(day_commits)
+
         if commits:
             result[name] = commits
     return result
@@ -120,9 +131,10 @@ def _infer_description(target_date: datetime.date, monthly: dict) -> str:
 
 
 class HancomUploader:
-    def __init__(self, google_email: str = "", google_password: str = ""):
+    def __init__(self, google_email: str = "", google_password: str = "", headless: bool = False):
         self.google_email = google_email
         self.google_password = google_password
+        self.headless = headless
         self._pw = None
         self._browser = None
         self._context = None
@@ -130,7 +142,7 @@ class HancomUploader:
 
     def __enter__(self):
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=False)
+        self._browser = self._pw.chromium.launch(headless=self.headless)
         if SESSION_FILE.exists():
             self._context = self._browser.new_context(storage_state=str(SESSION_FILE))
         else:
@@ -388,7 +400,26 @@ def main():
     parser.add_argument("--day", type=int)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--fill-empty", action="store_true", help="커밋 없는 날도 템플릿으로 입력")
+    parser.add_argument("--headless", action="store_true", help="브라우저 headless 모드 (CI 환경용)")
     args = parser.parse_args()
+
+    # CI 환경: 환경변수에서 세션 복원
+    session_b64 = os.environ.get("HANCOM_SESSION")
+    if session_b64 and not SESSION_FILE.exists():
+        DIST_DIR.mkdir(exist_ok=True)
+        SESSION_FILE.write_bytes(base64.b64decode(session_b64))
+        print("  세션 환경변수에서 복원됨")
+
+    # CI 환경: config.json을 환경변수에서 복원
+    config_json = os.environ.get("HANCOM_CONFIG")
+    config_path = DIST_DIR / "config.json"
+    if config_json and not config_path.exists():
+        DIST_DIR.mkdir(exist_ok=True)
+        config_path.write_text(config_json, encoding="utf-8")
+        print("  config 환경변수에서 복원됨")
+
+    # CI 환경이면 headless 자동 활성화
+    headless = args.headless or os.environ.get("CI") == "true"
 
     DIST_DIR.mkdir(exist_ok=True)
     config = load_config()
@@ -402,7 +433,7 @@ def main():
 
     if args.setup:
         print("Google 로그인을 진행합니다...")
-        with HancomUploader(google_email, google_password) as u:
+        with HancomUploader(google_email, google_password, headless=headless) as u:
             u.login()
         print("완료! 이제 자동 입력을 사용할 수 있습니다.")
         return
@@ -458,7 +489,7 @@ def main():
         return
 
     print(f"\n[2/2] 한컴 대시보드 입력 중...")
-    with HancomUploader(google_email, google_password) as u:
+    with HancomUploader(google_email, google_password, headless=headless) as u:
         if not u._is_logged_in():
             print("  세션 만료 → 재로그인 중...")
             u.login()

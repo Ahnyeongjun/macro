@@ -1,8 +1,10 @@
 """Git 커밋 로그 수집 및 폴더별 포맷"""
 
 import datetime
+import json
 import re
 import subprocess
+import urllib.request
 from collections import Counter, OrderedDict
 
 COMMIT_PREFIX_RE = re.compile(
@@ -93,6 +95,58 @@ def _should_skip(msg: str) -> bool:
     if len(msg) <= 1:
         return True
     return any(p.search(msg) for p in SKIP_PATTERNS)
+
+
+def collect_github(repo_name: str, author_email: str,
+                   start: datetime.date, end: datetime.date,
+                   token: str = None) -> list:
+    """GitHub API로 커밋을 수집합니다.
+
+    repo_name: 'owner/repo' 형식
+    반환: [(date, message, primary_folder)]
+    """
+    headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "hancom-uploader"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    since = start.isoformat() + "T00:00:00Z"
+    until = (end + datetime.timedelta(days=1)).isoformat() + "T00:00:00Z"
+    url = (
+        f"https://api.github.com/repos/{repo_name}/commits"
+        f"?since={since}&until={until}&per_page=100"
+    )
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            items = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        print(f"  경고: GitHub API 오류 ({repo_name}): {e.code} {e.reason}")
+        return []
+    except Exception as e:
+        print(f"  경고: GitHub API 실패 ({repo_name}): {e}")
+        return []
+
+    if not isinstance(items, list):
+        return []
+
+    commits = []
+    for item in items:
+        commit_data = item.get("commit", {})
+        author = commit_data.get("author", {})
+        # 이메일 필터
+        if author_email and author.get("email", "").lower() != author_email.lower():
+            continue
+        msg = commit_data.get("message", "").split("\n")[0].strip()
+        date_str = author.get("date", "")
+        if not date_str:
+            continue
+        try:
+            d = datetime.datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+        except ValueError:
+            continue
+        commits.append((d, msg, "(github)"))
+    return commits
 
 
 def format_by_feature(commits):

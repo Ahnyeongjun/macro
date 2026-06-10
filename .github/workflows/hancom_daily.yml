@@ -1,0 +1,63 @@
+name: Hancom Daily Upload
+
+on:
+  schedule:
+    # 매주 월~금 09:00 KST (= 00:00 UTC)
+    - cron: '0 0 * * 1-5'
+  workflow_dispatch:  # 수동 실행 버튼
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install playwright holidays
+
+      - name: Install Playwright browsers
+        run: playwright install chromium --with-deps
+
+      # 이전 실행에서 갱신된 세션 캐시 복원 (최근 7일치 유지)
+      - name: Restore session cache
+        uses: actions/cache@v4
+        id: session-cache
+        with:
+          path: dist/hancom_session.json
+          key: hancom-session-${{ github.run_number }}
+          restore-keys: |
+            hancom-session-
+
+      # 캐시가 없으면 시크릿에서 초기 세션 복원
+      - name: Restore session from secret
+        if: steps.session-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p dist
+          echo "$HANCOM_SESSION" | base64 -d > dist/hancom_session.json
+        env:
+          HANCOM_SESSION: ${{ secrets.HANCOM_SESSION }}
+
+      # config.json을 시크릿에서 복원 (Google 비밀번호 포함)
+      - name: Restore config
+        run: |
+          mkdir -p dist
+          echo '${{ secrets.HANCOM_CONFIG }}' > dist/config.json
+
+      - name: Run Hancom uploader
+        run: python hancom_uploader.py --headless
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 실행 후 갱신된 세션을 캐시에 저장
+      - name: Save session cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: dist/hancom_session.json
+          key: hancom-session-${{ github.run_number }}
