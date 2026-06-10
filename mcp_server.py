@@ -18,6 +18,7 @@ import email_sender
 import excel_writer
 import git_collector
 import hrweb_uploader
+import hancom_uploader
 
 SCRIPT_DIR = Path(__file__).parent
 DIST_DIR = SCRIPT_DIR / "dist"
@@ -551,6 +552,144 @@ def upload_hrweb(
 
 # ---------------------------------------------------------------------------
 # MCP Resources
+# ---------------------------------------------------------------------------
+
+@mcp.tool
+def preview_hancom(
+    year: int | None = None,
+    month: int | None = None,
+) -> str:
+    """한컴 공수 대시보드 입력 미리보기.
+    커밋 있는 날과 없는 날을 구분하여 보여줍니다.
+
+    Args:
+        year: 대상 연도. 미입력 시 올해.
+        month: 대상 월. 미입력 시 이번 달.
+    """
+    import datetime as dt
+
+    config = _load_config()
+    hancom_config = config.get("hancom", {})
+    if not hancom_config:
+        return "오류: dist/config.json에 hancom 설정이 없습니다."
+
+    today = dt.date.today()
+    y = year or today.year
+    m = month or today.month
+
+    weekdays = hancom_uploader.get_weekdays(y, m)
+    weekdays = [d for d in weekdays if d <= today]
+
+    if not weekdays:
+        return f"{y}년 {m}월에 입력할 평일이 없습니다."
+
+    lines = [f"## {y}년 {m}월 한컴 공수 미리보기"]
+    lines.append(f"이름: {hancom_config.get('name', '')}")
+    lines.append(f"기본 프로젝트: {hancom_config.get('default_project', '')}\n")
+
+    filled, empty = [], []
+    monthly = {}
+    for d in weekdays:
+        monthly[d] = hancom_uploader.collect_daily_commits(config, d)
+
+    for d in weekdays:
+        commits = monthly[d]
+        entries = hancom_uploader.build_entries(commits, hancom_config, d, monthly)
+        day_str = d.isoformat()
+        weekday = WEEKDAY_KR[d.weekday()]
+        if commits:
+            count = sum(len(c) for c in commits.values())
+            parts = [f"  - {e['project']}: {e['description']} ({e['minutes']}분)" for e in entries]
+            filled.append(f"- **{day_str} ({weekday})** 커밋 {count}개\n" + "\n".join(parts))
+        else:
+            empty.append(f"- {day_str} ({weekday})")
+
+    lines.append(f"### 커밋 있는 날 ({len(filled)}일) - 자동 입력")
+    lines.extend(filled)
+    lines.append(f"\n### 커밋 없는 날 ({len(empty)}일) - AI가 채워주세요")
+    lines.extend(empty)
+    lines.append("\n💡 upload_hancom의 daily_entries에 빈 날짜 데이터를 추가하세요.")
+    return "\n".join(lines)
+
+
+@mcp.tool
+def upload_hancom(
+    year: int | None = None,
+    month: int | None = None,
+    daily_entries: str = "",
+) -> str:
+    """한컴 공수 대시보드에 공수를 자동 입력합니다.
+    세션 파일이 없으면 먼저 --setup으로 Google 로그인이 필요합니다.
+
+    Args:
+        year: 대상 연도. 미입력 시 올해.
+        month: 대상 월. 미입력 시 이번 달.
+        daily_entries: AI가 생성한 날짜별 데이터 JSON.
+            형식: {"2026-06-10": [{"project": "프로젝트명", "description": "업무", "minutes": 480}]}
+    """
+    import datetime as dt
+
+    session_file = hancom_uploader.SESSION_FILE
+    if not session_file.exists():
+        return (
+            "세션 파일이 없습니다. 터미널에서 먼저 실행해주세요:\n"
+            "  python hancom_uploader.py --setup"
+        )
+
+    config = _load_config()
+    hancom_config = config.get("hancom", {})
+    if not hancom_config:
+        return "오류: dist/config.json에 hancom 설정이 없습니다."
+
+    today = dt.date.today()
+    y = year or today.year
+    m = month or today.month
+
+    weekdays = hancom_uploader.get_weekdays(y, m)
+    weekdays = [d for d in weekdays if d <= today]
+
+    if not weekdays:
+        return f"{y}년 {m}월에 입력할 평일이 없습니다."
+
+    overrides = json.loads(daily_entries) if daily_entries else {}
+
+    monthly = {}
+    for d in weekdays:
+        monthly[d] = hancom_uploader.collect_daily_commits(config, d)
+
+    daily_data = {}
+    lines = [f"## {y}년 {m}월 한컴 공수 입력 ({len(weekdays)}일)"]
+    for d in weekdays:
+        day_str = d.isoformat()
+        if day_str in overrides:
+            entries = overrides[day_str]
+            for e in entries:
+                e.setdefault("date", day_str)
+                e.setdefault("name", hancom_config.get("name", ""))
+            daily_data[d] = entries
+        else:
+            commits = monthly.get(d, {})
+            daily_data[d] = hancom_uploader.build_entries(commits, hancom_config, d, monthly)
+        src = "AI" if day_str in overrides else "Git"
+        parts = [f"{e['project']}({e['minutes']}분)" for e in daily_data[d]]
+        lines.append(f"- {d} ({WEEKDAY_KR[d.weekday()]}) [{src}] {' + '.join(parts)}")
+
+    with hancom_uploader.HancomUploader() as uploader:
+        if not uploader.is_logged_in():
+            return "세션이 만료됐습니다. python hancom_uploader.py --setup 으로 재로그인해주세요."
+
+        success = 0
+        for d in weekdays:
+            uploader.navigate_to_form()
+            for entry in daily_data[d]:
+                ok = uploader.fill_entry(entry)
+                if ok:
+                    success += 1
+
+    lines.append(f"\n완료: {success}건 입력")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 
 @mcp.resource("config://report")
