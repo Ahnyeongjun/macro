@@ -54,12 +54,12 @@ jobs:
         continue-on-error: true
         run: python hrweb_uploader.py --headless
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
 
       - name: Run Hancom uploader
         run: python hancom_uploader.py --headless
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
 
       # 실행 후 갱신된 세션을 캐시에 저장
       - name: Save session cache
