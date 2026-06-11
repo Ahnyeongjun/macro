@@ -39,7 +39,7 @@ jobs:
         if: steps.session-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p dist
-          echo "$HANCOM_SESSION" | base64 -d > dist/hancom_session.json
+          python -c "import base64,os; open('dist/hancom_session.json','wb').write(base64.b64decode(os.environ['HANCOM_SESSION']))"
         env:
           HANCOM_SESSION: ${{ secrets.HANCOM_SESSION }}
 
