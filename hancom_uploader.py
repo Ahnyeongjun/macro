@@ -144,7 +144,15 @@ class HancomUploader:
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(headless=self.headless)
         if SESSION_FILE.exists():
-            self._context = self._browser.new_context(storage_state=str(SESSION_FILE))
+            try:
+                # 세션 파일 유효성 확인 (최소 1KB 이상이어야 정상)
+                if SESSION_FILE.stat().st_size < 1024:
+                    raise ValueError(f"세션 파일 너무 작음 ({SESSION_FILE.stat().st_size}B)")
+                self._context = self._browser.new_context(storage_state=str(SESSION_FILE))
+            except Exception as e:
+                print(f"  세션 파일 오류 ({e}), 새 세션으로 시작")
+                SESSION_FILE.unlink(missing_ok=True)
+                self._context = self._browser.new_context()
         else:
             self._context = self._browser.new_context()
         self.page = self._context.new_page()
